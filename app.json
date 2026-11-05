@@ -17,10 +17,14 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single"
     },
     "plugins": [
       "expo-sqlite",
@@ -34,6 +38,16 @@
         }
       ],
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "d0bf3ec9-2ce0-40e2-9f48-517163188268"
+      }
+    }
   }
 }

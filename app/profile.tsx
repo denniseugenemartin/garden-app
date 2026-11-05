@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { confirmAction } from '../src/confirm';
+import { leaveDemo, useIsDemo } from '../src/demo';
 import { HARDINESS_ZONES, Profile, getProfile, lookupZoneByZip, setHardinessZone } from '../src/profile';
 import { supabase } from '../src/supabase';
 import { colors } from '../src/theme';
@@ -18,6 +19,7 @@ import { colors } from '../src/theme';
 export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isDemo = useIsDemo();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [zip, setZip] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
@@ -115,13 +117,20 @@ export default function ProfileScreen() {
       <Pressable
         style={styles.signOut}
         onPress={() =>
-          confirmAction('Sign out?', 'You can sign back in any time.', 'Sign out', () => {
-            supabase.auth.signOut();
-          })
+          isDemo
+            ? confirmAction(
+                'Leave the demo?',
+                'The sample garden and anything you added will be deleted.',
+                'Leave demo',
+                leaveDemo,
+              )
+            : confirmAction('Sign out?', 'You can sign back in any time.', 'Sign out', () => {
+                supabase.auth.signOut();
+              })
         }
         accessibilityRole="button"
       >
-        <Text style={styles.signOutText}>Sign out</Text>
+        <Text style={styles.signOutText}>{isDemo ? 'Leave demo' : 'Sign out'}</Text>
       </Pressable>
 
       <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>

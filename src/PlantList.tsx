@@ -1,6 +1,7 @@
 import { Link, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { demoSeeded } from './demo';
 import { Plant, listPlants } from './garden';
 import { usePhotoUris } from './photoStorage';
 import { colors } from './theme';
@@ -14,7 +15,8 @@ export default function PlantList({ wishlist }: { wishlist: boolean }) {
   const photoSrc = usePhotoUris((plants ?? []).map((plant) => plant.photoUri));
 
   const load = useCallback(() => {
-    listPlants(wishlist)
+    demoSeeded()
+      .then(() => listPlants(wishlist))
       .then((result) => {
         setPlants(result);
         setLoadError(null);
