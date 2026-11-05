@@ -23,7 +23,7 @@ const SLIDES: Slide[] = [
   {
     image: require('../assets/about/home.png'),
     title: 'Your garden at a glance',
-    body: 'Every plant you add shows up here. Tap a plant to open it, or tap its photo to see it full size.',
+    body: 'Every plant you add shows up here, sorted by scientific name. Tap a plant to open it, or its photo to see it full size. Wishlist, Profile and About are along the top.',
   },
   {
     image: require('../assets/about/search.png'),
@@ -33,12 +33,12 @@ const SLIDES: Slide[] = [
   {
     image: require('../assets/about/plant.png'),
     title: 'Plant: your details',
-    body: "Record where it's planted, when, and your own notes. Add your photo, or pick a reference photo from NC State.",
+    body: "Record where it's planted, when, and your own notes. Choose its main photo: take one, pick one from NC State, or use one from its journal.",
   },
   {
     image: require('../assets/about/info.png'),
     title: 'Info: expert growing guide',
-    body: 'Light, soil, hardiness zone, flowers, leaves and more. Tap a heading to expand it, Edit to adjust it for your plant, or Sync for the latest from NC State.',
+    body: 'Light, soil, hardiness zone, flowers, leaves and more. Your own zone is highlighted in green. Tap a heading to expand it, Edit to adjust it, or Sync for the latest from NC State.',
   },
   {
     image: require('../assets/about/journal.png'),
@@ -46,9 +46,19 @@ const SLIDES: Slide[] = [
     body: 'Log what you notice — blooms, pests, growth, harvests — with an optional photo. Each entry is dated for you.',
   },
   {
+    image: require('../assets/about/wishlist.png'),
+    title: 'Wishlist: plants you want',
+    body: "Save plants you'd like to grow, with the same details and growing info. When you get one, turn off “On my wishlist” and it moves into your garden.",
+  },
+  {
+    image: require('../assets/about/profile.png'),
+    title: 'Profile: your hardiness zone',
+    body: 'Enter your ZIP code to look up your USDA hardiness zone, or pick it from the list. You can also sign out here.',
+  },
+  {
     image: require('../assets/about/photo.png'),
     title: 'Where the info comes from',
-    body: "Plant info comes from the NC State Extension Gardener Plant Toolbox. Photos are shared by their photographers under Creative Commons licenses, and every one is credited. Your garden stays on this device.",
+    body: "Plant info comes from the NC State Extension Gardener Plant Toolbox. Photos are shared by their photographers under Creative Commons licenses, and every one is credited. Your garden is saved to your account, so it's there on any device you sign in on.",
   },
 ];
 

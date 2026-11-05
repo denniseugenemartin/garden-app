@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import HomeButton from '../src/HomeButton';
 import { supabase } from '../src/supabase';
 import { colors } from '../src/theme';
 
@@ -25,14 +26,17 @@ export default function RootLayout() {
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
           contentStyle: { backgroundColor: colors.background },
+          headerLeft: () => <HomeButton />,
         }}
       >
         <Stack.Protected guard={!!session} redirectTo="/sign-in">
           <Stack.Screen name="index" options={{ title: 'My Garden' }} />
           <Stack.Screen name="plant/[id]" />
+          <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+          <Stack.Screen name="wishlist" options={{ title: 'Wishlist' }} />
         </Stack.Protected>
         <Stack.Protected guard={!session} redirectTo="/">
-          <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
+          <Stack.Screen name="sign-in" options={{ title: 'Sign in', headerLeft: () => null }} />
         </Stack.Protected>
         <Stack.Screen name="about" options={{ title: 'About' }} />
       </Stack>

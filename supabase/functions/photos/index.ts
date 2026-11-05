@@ -17,7 +17,9 @@ const UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const VIEW_EXPIRES_SECONDS = 60 * 60;
 const MAX_KEYS = 200;
 // Storage limits. R2's free tier is 10 GB; past that Cloudflare bills automatically with no cap.
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+// App uploads are resized to ~0.2-0.5 MB; sampled NC State photos were all under 0.9 MB.
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+const MAX_PHOTO_LABEL = `${MAX_PHOTO_BYTES / 1024 / 1024} MB`;
 const MAX_PHOTOS_PER_GARDEN = 1000;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024 * 1024;
 // Reference photos may only be copied from NC State's Plant Toolbox image bucket.
@@ -35,7 +37,9 @@ function bad(message: string, status = 400) {
 
 /** An error response if storing `bytes` more in this garden would pass a limit, otherwise null. */
 async function checkLimits(admin: AdminClient, gardenId: string, bytes: number): Promise<Response | null> {
-  if (bytes > MAX_PHOTO_BYTES) return bad('That photo is too large (5 MB max).', 413);
+  if (bytes > MAX_PHOTO_BYTES) {
+    return bad(`This photo is ${(bytes / 1024 / 1024).toFixed(1)} MB, over the ${MAX_PHOTO_LABEL} limit.`, 413);
+  }
   const { data, error } = await admin.rpc('photo_usage', { target_garden: gardenId }).single();
   if (error) throw new Error(error.message);
   const usage = data as { garden_photos: number; total_bytes: number };
@@ -69,6 +73,15 @@ async function allowedKeys(supabase: Client, keys: unknown): Promise<string[]> {
 
 function newKey(gardenId: string, contentType: string): string {
   return `gardens/${gardenId}/${crypto.randomUUID()}.${EXTENSIONS[contentType]}`;
+}
+
+/** The image type from the file's first bytes; servers sometimes label images as generic downloads. */
+function sniffImageType(bytes: Uint8Array): string | null {
+  const ascii = (start: number, end: number) => String.fromCharCode(...bytes.slice(start, end));
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (ascii(1, 4) === 'PNG') return 'image/png';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  return null;
 }
 
 async function signedUrl(
@@ -144,12 +157,19 @@ async function handle(req: Request, ctx: SupabaseContext): Promise<Response> {
         if (!(await memberGardens(ctx.supabase, [gardenId])).has(gardenId)) return bad('Not a member', 403);
 
         const upstream = await fetch(source, { redirect: 'error' }).catch(() => null);
-        const contentType = upstream?.headers.get('content-type')?.split(';')[0] ?? '';
-        if (!upstream?.ok || !EXTENSIONS[contentType]) return bad('Could not download that photo', 502);
-        if (Number(upstream.headers.get('content-length')) > MAX_PHOTO_BYTES) {
-          return bad('That photo is too large (5 MB max).', 413);
+        if (!upstream?.ok) {
+          return bad("NC State's photo server didn't send the photo. Try again or pick a different one.", 502);
+        }
+        const declaredBytes = Number(upstream.headers.get('content-length'));
+        if (declaredBytes > MAX_PHOTO_BYTES) {
+          return bad(
+            `This NC State photo is ${(declaredBytes / 1024 / 1024).toFixed(1)} MB, over the ${MAX_PHOTO_LABEL} limit. Pick a different one.`,
+            413,
+          );
         }
         const bytes = await upstream.arrayBuffer();
+        const contentType = sniffImageType(new Uint8Array(bytes, 0, Math.min(12, bytes.byteLength)));
+        if (!contentType) return bad('That NC State photo isn’t a JPEG, PNG or WebP image. Pick a different one.', 415);
         const overLimit = await checkLimits(ctx.supabaseAdmin, gardenId, bytes.byteLength);
         if (overLimit) return overLimit;
 
@@ -165,7 +185,17 @@ async function handle(req: Request, ctx: SupabaseContext): Promise<Response> {
       }
 
       case 'delete': {
-        const keys = await allowedKeys(ctx.supabase, body.keys);
+        const requested = await allowedKeys(ctx.supabase, body.keys);
+        // A journal photo can also be its plant's primary photo; keep anything still referenced.
+        const inUse = new Set<string>();
+        if (requested.length > 0) {
+          for (const table of ['plants', 'journal_entries']) {
+            const { data, error } = await ctx.supabaseAdmin.from(table).select('photo_key').in('photo_key', requested);
+            if (error) throw new Error(error.message);
+            for (const row of data ?? []) inUse.add(row.photo_key);
+          }
+        }
+        const keys = requested.filter((key) => !inUse.has(key));
         await Promise.all(keys.map((key) => r2.fetch(`${R2_URL}/${key}`, { method: 'DELETE' })));
         if (keys.length > 0) await ctx.supabaseAdmin.from('photo_objects').delete().in('key', keys);
         return Response.json({ deleted: keys.length });

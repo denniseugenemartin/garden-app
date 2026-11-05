@@ -6,13 +6,21 @@ import { colors } from './theme';
 type Props = {
   description: string | null;
   sections: ToolboxSection[] | null;
+  /** The user's USDA zone, highlighted in the hardiness zone row. */
+  hardinessZone?: string | null;
   onDescriptionChange: (description: string) => void;
   onSectionsChange: (sections: ToolboxSection[]) => void;
 };
 
 const DESCRIPTION = 'Description';
 
-export default function ToolboxSections({ description, sections, onDescriptionChange, onSectionsChange }: Props) {
+export default function ToolboxSections({
+  description,
+  sections,
+  hardinessZone,
+  onDescriptionChange,
+  onSectionsChange,
+}: Props) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState(false);
 
@@ -97,11 +105,21 @@ export default function ToolboxSections({ description, sections, onDescriptionCh
                     />
                   ) : values.length > 1 ? (
                     <View style={styles.chips}>
-                      {values.map((value) => (
-                        <Text key={value} style={styles.chip}>
-                          {value}
-                        </Text>
-                      ))}
+                      {values.map((value) => {
+                        const mine =
+                          !!hardinessZone &&
+                          /hardiness zone/i.test(row.label) &&
+                          value.trim().toLowerCase() === hardinessZone.toLowerCase();
+                        return (
+                          <Text
+                            key={value}
+                            style={[styles.chip, mine && styles.chipMine]}
+                            accessibilityLabel={mine ? `${value}, your zone` : undefined}
+                          >
+                            {value}
+                          </Text>
+                        );
+                      })}
                     </View>
                   ) : (
                     <Text style={styles.rowValue}>{values[0]}</Text>
@@ -135,6 +153,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 10,
     paddingVertical: 4,
+  },
+  chipMine: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+    color: '#ffffff',
+    fontWeight: '600',
   },
   input: {
     backgroundColor: colors.surface,

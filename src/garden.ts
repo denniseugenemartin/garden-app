@@ -1,9 +1,9 @@
 import type { ToolboxDetails, ToolboxSection } from './ncstateDetails';
-import { deletePhotos, importReferencePhoto, isStoredPhoto, uploadPhoto } from './photoStorage';
+import { deletePhotos, importNcStatePhoto, isNcStatePhotoUrl, isStoredPhoto, uploadPhoto } from './photoStorage';
 import { supabase } from './supabase';
 
-// photoUri / referencePhotoUri hold a storage key once saved (see photoStorage.ts). Before saving they
-// can hold a newly picked local photo or an NC State photo URL, which are stored on save.
+// photoUri holds a storage key once saved (see photoStorage.ts). Before saving it can hold a newly
+// picked local photo or an NC State photo URL, which are stored on save.
 
 export type PlantDraft = {
   commonName: string;
@@ -12,14 +12,17 @@ export type PlantDraft = {
   location: string | null;
   acquiredOn: string | null;
   notes: string | null;
+  // The plant's primary photo: the user's own, one of its journal photos, or from NC State.
   photoUri: string | null;
-  referencePhotoUri: string | null;
-  referencePhotoCredit: string | null;
-  referencePhotoLicenseUrl: string | null;
+  // Set when the photo came from NC State, whose licenses require attribution.
+  photoCredit: string | null;
+  photoLicenseUrl: string | null;
   toolboxSlug: string | null;
   // NC State info as shown: the user's edited copy if they changed it, otherwise the shared data.
   toolboxDescription: string | null;
   toolboxSections: ToolboxSection[] | null;
+  // On the wishlist instead of in the garden.
+  wishlist: boolean;
 };
 
 export type Plant = PlantDraft & {
@@ -45,12 +48,12 @@ type PlantRow = {
   acquired_on: string | null;
   notes: string | null;
   photo_key: string | null;
-  reference_photo_key: string | null;
-  reference_photo_credit: string | null;
-  reference_photo_license_url: string | null;
+  photo_credit: string | null;
+  photo_license_url: string | null;
   toolbox_slug: string | null;
   toolbox_overrides: ToolboxDetails | null;
   toolbox_plants: ToolboxDetails | null;
+  wishlist: boolean;
 };
 
 type JournalRow = {
@@ -107,13 +110,13 @@ function toPlant(row: PlantRow): Plant {
     acquiredOn: row.acquired_on,
     notes: row.notes,
     photoUri: row.photo_key,
-    referencePhotoUri: row.reference_photo_key,
-    referencePhotoCredit: row.reference_photo_credit,
-    referencePhotoLicenseUrl: row.reference_photo_license_url,
+    photoCredit: row.photo_credit,
+    photoLicenseUrl: row.photo_license_url,
     toolboxSlug: row.toolbox_slug,
     toolboxDescription: shown?.description ?? null,
     toolboxSections: shown?.sections ?? null,
     toolboxBase: base,
+    wishlist: row.wishlist,
   };
 }
 
@@ -134,35 +137,47 @@ function toRow(draft: PlantDraft, toolbox: { slug: string; base: ToolboxDetails 
     acquired_on: draft.acquiredOn,
     notes: draft.notes,
     photo_key: draft.photoUri,
-    reference_photo_key: draft.referencePhotoUri,
-    reference_photo_credit: draft.referencePhotoCredit,
-    reference_photo_license_url: draft.referencePhotoLicenseUrl,
+    photo_credit: draft.photoCredit,
+    photo_license_url: draft.photoLicenseUrl,
     toolbox_slug: toolbox?.slug ?? null,
     toolbox_overrides: edited
       ? { description: draft.toolboxDescription, sections: draft.toolboxSections ?? [] }
       : null,
+    wishlist: draft.wishlist,
   };
 }
 
-/** Uploads any photos picked since the draft was loaded, replacing them with storage keys. */
-async function storePhotos(draft: PlantDraft): Promise<PlantDraft> {
+/** Stores a photo picked since the draft was loaded, replacing it with its storage key. */
+async function storePhoto(draft: PlantDraft): Promise<PlantDraft> {
+  const { photoUri } = draft;
+  if (!photoUri || isStoredPhoto(photoUri)) return draft;
   const gardenId = await getGardenId();
-  const [photoUri, referencePhotoUri] = await Promise.all([
-    draft.photoUri && !isStoredPhoto(draft.photoUri) ? uploadPhoto(draft.photoUri, gardenId) : draft.photoUri,
-    draft.referencePhotoUri && !isStoredPhoto(draft.referencePhotoUri)
-      ? importReferencePhoto(draft.referencePhotoUri, gardenId)
-      : draft.referencePhotoUri,
-  ]);
-  return { ...draft, photoUri, referencePhotoUri };
+  try {
+    const key = isNcStatePhotoUrl(photoUri)
+      ? await importNcStatePhoto(photoUri, gardenId)
+      : await uploadPhoto(photoUri, gardenId);
+    return { ...draft, photoUri: key };
+  } catch (error) {
+    throw new Error(`The photo couldn't be saved: ${(error as Error).message}`);
+  }
 }
 
-export async function listPlants(): Promise<Plant[]> {
+export async function listPlants(wishlist: boolean): Promise<Plant[]> {
   const rows = check(
-    await supabase.from('plants').select(PLANT_COLUMNS).eq('garden_id', await getGardenId()),
+    await supabase
+      .from('plants')
+      .select(PLANT_COLUMNS)
+      .eq('garden_id', await getGardenId())
+      .eq('wishlist', wishlist),
   ) as PlantRow[];
-  return rows
-    .map(toPlant)
-    .sort((a, b) => a.commonName.localeCompare(b.commonName, undefined, { sensitivity: 'base' }));
+  const compare = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+  // Plants without a scientific name go last, by common name.
+  return rows.map(toPlant).sort((a, b) => {
+    const sa = a.scientificName?.trim() ?? '';
+    const sb = b.scientificName?.trim() ?? '';
+    if (!sa !== !sb) return sa ? -1 : 1;
+    return compare(sa, sb) || compare(a.commonName, b.commonName);
+  });
 }
 
 export async function getPlant(id: string): Promise<Plant | null> {
@@ -177,7 +192,7 @@ export async function insertPlant(
   const row = check(
     await supabase
       .from('plants')
-      .insert({ ...toRow(await storePhotos(draft), toolbox), garden_id: await getGardenId() })
+      .insert({ ...toRow(await storePhoto(draft), toolbox), garden_id: await getGardenId() })
       .select('id')
       .single(),
   );
@@ -189,27 +204,21 @@ export async function updatePlant(
   draft: PlantDraft,
   toolbox: { slug: string; base: ToolboxDetails } | null,
 ): Promise<void> {
-  const before = check(
-    await supabase.from('plants').select('photo_key, reference_photo_key').eq('id', id).single(),
-  );
-  const stored = await storePhotos(draft);
+  const before = check(await supabase.from('plants').select('photo_key').eq('id', id).single());
+  const stored = await storePhoto(draft);
   check(await supabase.from('plants').update(toRow(stored, toolbox)).eq('id', id));
-  deletePhotos([
-    before?.photo_key !== stored.photoUri ? before?.photo_key : null,
-    before?.reference_photo_key !== stored.referencePhotoUri ? before?.reference_photo_key : null,
-  ]);
+  // The server keeps the old photo if a journal entry still uses it.
+  if (before?.photo_key !== stored.photoUri) deletePhotos([before?.photo_key]);
 }
 
 /** Also deletes the plant's journal entries (cascades in the database) and all their photos. */
 export async function deletePlant(id: string): Promise<void> {
-  const plant = check(
-    await supabase.from('plants').select('photo_key, reference_photo_key').eq('id', id).single(),
-  );
+  const plant = check(await supabase.from('plants').select('photo_key').eq('id', id).single());
   const entries = check(
     await supabase.from('journal_entries').select('photo_key').eq('plant_id', id),
   ) as { photo_key: string | null }[];
   check(await supabase.from('plants').delete().eq('id', id));
-  deletePhotos([plant?.photo_key, plant?.reference_photo_key, ...entries.map((entry) => entry.photo_key)]);
+  deletePhotos([plant?.photo_key, ...entries.map((entry) => entry.photo_key)]);
 }
 
 export async function listJournalEntries(plantId: string): Promise<JournalEntry[]> {

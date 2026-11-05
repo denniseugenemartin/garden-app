@@ -16,6 +16,11 @@ export function isStoredPhoto(value: string | null | undefined): value is string
   return typeof value === 'string' && value.startsWith(KEY_PREFIX);
 }
 
+// Full-size NC State Plant Toolbox photos are served from this bucket.
+export function isNcStatePhotoUrl(value: string): boolean {
+  return value.startsWith('https://eit-planttoolbox-prod.s3.amazonaws.com/');
+}
+
 async function callPhotos<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('photos', { body });
   if (error) {
@@ -58,7 +63,7 @@ export async function uploadPhoto(localUri: string, gardenId: string): Promise<s
 }
 
 /** Copies an NC State Plant Toolbox photo into the garden (its own links expire); returns its key. */
-export async function importReferencePhoto(sourceUrl: string, gardenId: string): Promise<string> {
+export async function importNcStatePhoto(sourceUrl: string, gardenId: string): Promise<string> {
   const { key } = await callPhotos<{ key: string }>({
     action: 'import',
     gardenId,
