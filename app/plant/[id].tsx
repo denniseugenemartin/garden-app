@@ -1,8 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Linking,
   Pressable,
@@ -16,18 +15,13 @@ import Journal from '../../src/Journal';
 import SpeciesSearch from '../../src/SpeciesSearch';
 import ToolboxSections from '../../src/ToolboxSections';
 import NcStatePhotoPicker from '../../src/NcStatePhotoPicker';
-import {
-  PlantDraft,
-  deletePlant,
-  findCatalogSlug,
-  getPlant,
-  insertPlant,
-  updatePlant,
-} from '../../src/db';
+import { findCatalogSlug } from '../../src/catalog';
+import { PlantDraft, deletePlant, getPlant, insertPlant, updatePlant } from '../../src/garden';
 import { resolveToolboxUrl, slugify, toolboxPageUrl, toolboxSearchUrl } from '../../src/ncstate';
-import { fetchToolboxDetails } from '../../src/ncstateDetails';
+import { ToolboxDetails, fetchToolboxDetails } from '../../src/ncstateDetails';
 import { ToolboxPhoto } from '../../src/ncstateGallery';
-import { persistRemotePhoto, pickPhoto } from '../../src/photos';
+import { pickPhoto } from '../../src/photos';
+import { usePhotoUris } from '../../src/photoStorage';
 import { confirmAction } from '../../src/confirm';
 import { parseScientificName } from '../../src/scientificName';
 import { colors } from '../../src/theme';
@@ -38,10 +32,6 @@ const EMPTY: PlantDraft = {
   cultivar: null,
   location: null,
   acquiredOn: null,
-  cycle: null,
-  watering: null,
-  sunlight: null,
-  hardinessZone: null,
   notes: null,
   photoUri: null,
   referencePhotoUri: null,
@@ -53,52 +43,98 @@ const EMPTY: PlantDraft = {
 };
 
 // A slug picked from search wins; otherwise match the scientific name against the NC State catalog.
-function resolveToolboxSlug(draft: PlantDraft): string | null {
-  if (draft.toolboxSlug) return draft.toolboxSlug;
-  if (!draft.scientificName) return null;
-  const species = parseScientificName(draft.scientificName).scientificName;
-  return findCatalogSlug(draft.scientificName) ?? findCatalogSlug(species) ?? slugify(species);
+async function resolveToolboxSlug(
+  pickedSlug: string | null,
+  scientificName: string | null,
+): Promise<string | null> {
+  if (pickedSlug) return pickedSlug;
+  if (!scientificName) return null;
+  const species = parseScientificName(scientificName).scientificName;
+  return (
+    (await findCatalogSlug(scientificName)) ?? (await findCatalogSlug(species)) ?? slugify(species)
+  );
 }
 
-export default function PlantFormScreen() {
-  const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const isNew = id === 'new';
-  const plantId = isNew ? null : Number(id);
+// Identifies the inputs NC State data was loaded for, so saved data isn't re-fetched on open.
+function toolboxKey(pickedSlug: string | null, scientificName: string | null): string {
+  return `${pickedSlug ?? ''}|${scientificName ?? ''}`;
+}
 
-  const [draft, setDraft] = useState<PlantDraft>(() => {
-    if (plantId === null) return { ...EMPTY, acquiredOn: new Date().toISOString().slice(0, 10) };
-    const existing = getPlant(plantId);
-    if (!existing) return EMPTY;
-    const { id: _id, ...rest } = existing;
-    return rest;
-  });
+type Loaded = { draft: PlantDraft; toolboxBase: ToolboxDetails | null };
+
+export default function PlantScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const plantId = id === 'new' ? null : id;
+  const [loaded, setLoaded] = useState<Loaded | null>(() =>
+    plantId === null
+      ? { draft: { ...EMPTY, acquiredOn: new Date().toISOString().slice(0, 10) }, toolboxBase: null }
+      : null,
+  );
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (plantId === null) return;
+    getPlant(plantId)
+      .then((plant) => {
+        if (!plant) {
+          setLoadError('This plant no longer exists.');
+          return;
+        }
+        const { id: _id, toolboxBase, ...draft } = plant;
+        setLoaded({ draft, toolboxBase });
+      })
+      .catch((error: Error) => setLoadError(error.message));
+  }, [plantId]);
+
+  if (!loaded) {
+    return (
+      <View style={styles.loading}>
+        <Stack.Screen options={{ title: 'Plant' }} />
+        {loadError ? (
+          <Text style={styles.syncError}>{loadError}</Text>
+        ) : (
+          <ActivityIndicator color={colors.accent} />
+        )}
+      </View>
+    );
+  }
+  return <PlantForm plantId={plantId} initial={loaded} />;
+}
+
+function PlantForm({ plantId, initial }: { plantId: string | null; initial: Loaded }) {
+  const router = useRouter();
+  const isNew = plantId === null;
+
+  const [draft, setDraft] = useState<PlantDraft>(initial.draft);
+  // The shared NC State data the toolbox fields came from; saving stores only changes to it.
+  const [toolboxBase, setToolboxBase] = useState<ToolboxDetails | null>(initial.toolboxBase);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [openingToolbox, setOpeningToolbox] = useState(false);
   const [syncingToolbox, setSyncingToolbox] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('Plant');
   const extraRequestId = useRef(0);
-  const toolboxSlug = useMemo(
-    () => resolveToolboxSlug(draft),
-    [draft.toolboxSlug, draft.scientificName],
+  const [toolboxSlug, setToolboxSlug] = useState<string | null>(initial.draft.toolboxSlug);
+  const toolboxLoadedFor = useRef<string | null>(
+    initial.toolboxBase ? toolboxKey(initial.draft.toolboxSlug, initial.draft.scientificName) : null,
   );
-  // Slug the draft's NC State data belongs to; avoids re-fetching saved data.
-  const toolboxFetchedFor = useRef<string | null>(draft.toolboxSections ? toolboxSlug : null);
+  const pickedSlug = draft.toolboxSlug;
+  const scientificName = draft.scientificName;
+  const photoSrc = usePhotoUris([draft.photoUri, draft.referencePhotoUri]);
 
   useEffect(() => {
-    const slug = toolboxSlug;
-    if (slug === toolboxFetchedFor.current) return;
-    if (!slug) {
-      toolboxFetchedFor.current = null;
-      setDraft((current) => ({ ...current, toolboxDescription: null, toolboxSections: null }));
-      return;
-    }
+    const key = toolboxKey(pickedSlug, scientificName);
+    if (key === toolboxLoadedFor.current) return;
     const id = ++extraRequestId.current;
     const timer = setTimeout(async () => {
-      const details = await fetchToolboxDetails(slug);
+      const slug = await resolveToolboxSlug(pickedSlug, scientificName);
+      const details = slug ? await fetchToolboxDetails(slug) : null;
       if (id !== extraRequestId.current) return;
-      toolboxFetchedFor.current = slug;
+      toolboxLoadedFor.current = key;
+      setToolboxSlug(slug);
+      setToolboxBase(details);
       setDraft((current) => ({
         ...current,
         toolboxDescription: details?.description ?? null,
@@ -106,7 +142,7 @@ export default function PlantFormScreen() {
       }));
     }, 600);
     return () => clearTimeout(timer);
-  }, [toolboxSlug]);
+  }, [pickedSlug, scientificName]);
 
   function set<K extends keyof PlantDraft>(key: K, value: string) {
     // commonName is non-nullable; every other field stores empty as null.
@@ -126,19 +162,18 @@ export default function PlantFormScreen() {
 
   async function selectReferencePhoto(photo: ToolboxPhoto) {
     setPhotoPickerOpen(false);
-    const uri = await persistRemotePhoto(photo.fullUrl);
     const credit = [photo.photographer, photo.licenseName].filter(Boolean).join(' · ') || null;
     setDraft((current) => ({
       ...current,
-      referencePhotoUri: uri,
+      referencePhotoUri: photo.fullUrl,
       referencePhotoCredit: credit,
       referencePhotoLicenseUrl: photo.licenseUrl,
     }));
   }
 
-  function save() {
+  async function save() {
     if (draft.commonName.trim().length === 0) {
-      Alert.alert('Name required', 'Give this plant a name before saving.');
+      setSaveError('Give this plant a name before saving.');
       return;
     }
     // Allow pasting "Genus species 'Cultivar'" directly into the scientific name field.
@@ -149,12 +184,22 @@ export default function PlantFormScreen() {
       scientificName: parsed?.scientificName ?? draft.scientificName,
       cultivar: draft.cultivar ?? parsed?.cultivar ?? null,
     };
-    if (plantId === null) {
-      insertPlant(cleaned);
-    } else {
-      updatePlant(plantId, cleaned);
+    // Link the plant to NC State only once its data has loaded (the slug may be a guess).
+    const toolbox = toolboxSlug && toolboxBase ? { slug: toolboxSlug, base: toolboxBase } : null;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (plantId === null) {
+        await insertPlant(cleaned, toolbox);
+      } else {
+        await updatePlant(plantId, cleaned, toolbox);
+      }
+      close();
+    } catch (error) {
+      setSaveError((error as Error).message);
+    } finally {
+      setSaving(false);
     }
-    close();
   }
 
   // A directly opened/refreshed web page has no history to go back to.
@@ -165,9 +210,13 @@ export default function PlantFormScreen() {
 
   function confirmDelete() {
     if (plantId === null) return;
-    confirmAction('Delete plant', `Remove ${draft.commonName} from your garden?`, 'Delete', () => {
-      deletePlant(plantId);
-      close();
+    confirmAction('Delete plant', `Remove ${draft.commonName} from your garden?`, 'Delete', async () => {
+      try {
+        await deletePlant(plantId);
+        close();
+      } catch (error) {
+        setSaveError((error as Error).message);
+      }
     });
   }
 
@@ -176,13 +225,13 @@ export default function PlantFormScreen() {
     if (!slug) return;
     setSyncingToolbox(true);
     setSyncError(null);
-    const details = await fetchToolboxDetails(slug);
+    const details = await fetchToolboxDetails(slug, true);
     setSyncingToolbox(false);
     if (!details) {
       setSyncError("Couldn't load this plant from NC State.");
       return;
     }
-    toolboxFetchedFor.current = slug;
+    setToolboxBase(details);
     setDraft((current) => ({
       ...current,
       toolboxDescription: details.description,
@@ -202,8 +251,9 @@ export default function PlantFormScreen() {
   const toolboxQuery = draft.scientificName ?? draft.commonName;
 
   async function openToolbox() {
-    if (draft.toolboxSlug || (draft.scientificName && findCatalogSlug(draft.scientificName))) {
-      Linking.openURL(toolboxPageUrl(toolboxSlug!));
+    // NC State data loaded for this slug, so its page exists.
+    if (toolboxSlug && toolboxBase) {
+      Linking.openURL(toolboxPageUrl(toolboxSlug));
       return;
     }
     if (!draft.scientificName) {
@@ -220,9 +270,12 @@ export default function PlantFormScreen() {
   }
 
   const saveButton = (
-    <Pressable style={styles.primary} onPress={save}>
-      <Text style={styles.primaryText}>Save</Text>
-    </Pressable>
+    <>
+      <Pressable style={[styles.primary, saving && styles.disabled]} onPress={save} disabled={saving}>
+        {saving ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryText}>Save</Text>}
+      </Pressable>
+      {saveError && <Text style={styles.syncError}>{saveError}</Text>}
+    </>
   );
 
   return (
@@ -295,7 +348,9 @@ export default function PlantFormScreen() {
           />
 
           <Text style={styles.label}>Photo</Text>
-          {draft.photoUri && <Image source={{ uri: draft.photoUri }} style={styles.preview} />}
+          {photoSrc(draft.photoUri) && (
+            <Image source={{ uri: photoSrc(draft.photoUri)! }} style={styles.preview} />
+          )}
           <View style={styles.row}>
             <Pressable style={styles.secondary} onPress={() => attachPhoto(true)}>
               <Text style={styles.secondaryText}>Take photo</Text>
@@ -308,9 +363,9 @@ export default function PlantFormScreen() {
           {toolboxSlug && (
             <>
               <Text style={styles.label}>Reference photo</Text>
-              {draft.referencePhotoUri && (
+              {photoSrc(draft.referencePhotoUri) && (
                 <>
-                  <Image source={{ uri: draft.referencePhotoUri }} style={styles.preview} />
+                  <Image source={{ uri: photoSrc(draft.referencePhotoUri)! }} style={styles.preview} />
                   {draft.referencePhotoCredit && (
                     <Pressable
                       onPress={() =>
@@ -494,6 +549,8 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  disabled: { opacity: 0.6 },
+  loading: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 },
   delete: { alignItems: 'center', paddingVertical: 20 },
   deleteText: { color: colors.danger, fontSize: 15 },
   actions: { marginTop: 24 },

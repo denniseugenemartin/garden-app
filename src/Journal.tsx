@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { confirmAction } from './confirm';
-import { JournalEntry, deleteJournalEntry, insertJournalEntry, listJournalEntries } from './db';
+import { JournalEntry, deleteJournalEntry, insertJournalEntry, listJournalEntries } from './garden';
 import { pickPhoto } from './photos';
+import { usePhotoUris } from './photoStorage';
 import { colors } from './theme';
 
 function today(): string {
@@ -18,30 +19,57 @@ function formatDate(isoDate: string): string {
   });
 }
 
-export default function Journal({ plantId }: { plantId: number }) {
-  const [entries, setEntries] = useState<JournalEntry[]>(() => listJournalEntries(plantId));
+export default function Journal({ plantId }: { plantId: string }) {
+  const [entries, setEntries] = useState<JournalEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
-  const canAdd = text.trim().length > 0 || photoUri !== null;
+  const canAdd = (text.trim().length > 0 || photoUri !== null) && !saving;
+  const photoSrc = usePhotoUris((entries ?? []).map((entry) => entry.photoUri));
+
+  const reload = useCallback(
+    () =>
+      listJournalEntries(plantId)
+        .then(setEntries)
+        .catch((e: Error) => setError(e.message)),
+    [plantId],
+  );
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   async function attachPhoto(fromCamera: boolean) {
     const uri = await pickPhoto(fromCamera);
     if (uri) setPhotoUri(uri);
   }
 
-  function addEntry() {
+  async function addEntry() {
     if (!canAdd) return;
-    insertJournalEntry({ plantId, entryDate: today(), text: text.trim() || null, photoUri });
-    setText('');
-    setPhotoUri(null);
-    setEntries(listJournalEntries(plantId));
+    setSaving(true);
+    setError(null);
+    try {
+      await insertJournalEntry({ plantId, entryDate: today(), text: text.trim() || null, photoUri });
+      setText('');
+      setPhotoUri(null);
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function removeEntry(entry: JournalEntry) {
-    confirmAction('Delete entry', `Delete the entry from ${formatDate(entry.entryDate)}?`, 'Delete', () => {
-      deleteJournalEntry(entry.id);
-      setEntries(listJournalEntries(plantId));
+    confirmAction('Delete entry', `Delete the entry from ${formatDate(entry.entryDate)}?`, 'Delete', async () => {
+      try {
+        await deleteJournalEntry(entry);
+        await reload();
+      } catch (e) {
+        setError((e as Error).message);
+      }
     });
   }
 
@@ -77,7 +105,11 @@ export default function Journal({ plantId }: { plantId: number }) {
         </Pressable>
       </View>
 
-      {entries.length === 0 ? (
+      {error && <Text style={styles.error}>{error}</Text>}
+
+      {entries === null ? (
+        <ActivityIndicator color={colors.accent} style={styles.loading} />
+      ) : entries.length === 0 ? (
         <Text style={styles.empty}>No entries yet. Log what you see — blooms, pests, growth, harvests.</Text>
       ) : (
         entries.map((entry) => (
@@ -89,7 +121,9 @@ export default function Journal({ plantId }: { plantId: number }) {
               </Pressable>
             </View>
             {entry.text && <Text style={styles.entryText}>{entry.text}</Text>}
-            {entry.photoUri && <Image source={{ uri: entry.photoUri }} style={styles.entryPhoto} />}
+            {photoSrc(entry.photoUri) && (
+              <Image source={{ uri: photoSrc(entry.photoUri)! }} style={styles.entryPhoto} />
+            )}
           </View>
         ))
       )}
@@ -127,6 +161,8 @@ const styles = StyleSheet.create({
   primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
   disabled: { opacity: 0.4 },
   empty: { color: colors.muted, marginTop: 16, textAlign: 'center' },
+  error: { color: colors.danger, fontSize: 13 },
+  loading: { marginTop: 16 },
   entry: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,38 +8,41 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { catalogIsEmpty, catalogIsStale, downloadCatalog } from './catalog';
-import { CatalogPlant, searchCatalog } from './db';
+import { CatalogPlant, refreshCatalogIfStale, searchCatalog } from './catalog';
 import { colors } from './theme';
 
 type Props = {
   onSelect: (plant: CatalogPlant) => void;
 };
 
-type CatalogState = 'ready' | 'downloading' | 'failed';
+type Search = { term: string; results: CatalogPlant[] | null; failed: boolean };
 
 export default function SpeciesSearch({ onSelect }: Props) {
   const [query, setQuery] = useState('');
-  const [catalogState, setCatalogState] = useState<CatalogState>(() =>
-    catalogIsEmpty() ? 'downloading' : 'ready',
-  );
+  const [search, setSearch] = useState<Search>({ term: '', results: [], failed: false });
 
-  useEffect(() => {
-    if (catalogState === 'downloading') {
-      downloadCatalog()
-        .then(() => setCatalogState('ready'))
-        .catch(() => setCatalogState('failed'));
-    } else if (catalogState === 'ready' && catalogIsStale()) {
-      // Refresh in the background; the existing catalog keeps working if this fails.
-      downloadCatalog().catch(() => {});
-    }
-  }, [catalogState]);
+  useEffect(refreshCatalogIfStale, []);
 
   const term = query.trim();
-  const results = useMemo(
-    () => (catalogState === 'ready' && term.length >= 2 ? searchCatalog(term) : []),
-    [catalogState, term],
-  );
+
+  useEffect(() => {
+    if (term.length < 2) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchCatalog(term)
+        .then((results) => !cancelled && setSearch({ term, results, failed: false }))
+        .catch(() => !cancelled && setSearch({ term, results: [], failed: true }));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [term]);
+
+  // Only show results for what's typed now; anything else is still loading.
+  const current = term.length >= 2 && search.term === term ? search : null;
+  const results = current?.results ?? [];
+  const searching = term.length >= 2 && current === null;
 
   function handleSelect(plant: CatalogPlant) {
     onSelect(plant);
@@ -56,20 +59,13 @@ export default function SpeciesSearch({ onSelect }: Props) {
         placeholderTextColor={colors.placeholder}
         autoCorrect={false}
       />
-      {catalogState === 'downloading' && (
+      {searching && (
         <View style={styles.status}>
           <ActivityIndicator color={colors.accent} />
-          <Text style={styles.message}>Downloading the NC State plant list…</Text>
         </View>
       )}
-      {catalogState === 'failed' && (
-        <Pressable onPress={() => setCatalogState('downloading')}>
-          <Text style={styles.message}>
-            Couldn't download the NC State plant list. <Text style={styles.retry}>Try again</Text>
-          </Text>
-        </Pressable>
-      )}
-      {catalogState === 'ready' && term.length >= 2 && results.length === 0 && (
+      {current?.failed && <Text style={styles.message}>Couldn&apos;t search the NC State plant list.</Text>}
+      {current && !current.failed && results.length === 0 && (
         <Text style={styles.message}>No matches.</Text>
       )}
       {results.length > 0 && (
@@ -99,7 +95,6 @@ const styles = StyleSheet.create({
   inputEmpty: { backgroundColor: colors.emptyInput, borderColor: colors.emptyInput },
   status: { alignItems: 'center', flexDirection: 'row', gap: 8, marginTop: 8 },
   message: { color: colors.muted, marginTop: 8 },
-  retry: { color: colors.accent, fontWeight: '600' },
   resultsBox: { maxHeight: 280, marginTop: 4 },
   result: {
     borderBottomColor: colors.border,

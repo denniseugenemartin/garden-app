@@ -1,26 +1,49 @@
 import { Link, Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Plant, listPlants } from '../src/db';
+import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { confirmAction } from '../src/confirm';
+import { Plant, listPlants } from '../src/garden';
+import { usePhotoUris } from '../src/photoStorage';
+import { supabase } from '../src/supabase';
 import { colors } from '../src/theme';
 
 export default function PlantListScreen() {
   const router = useRouter();
-  const [plants, setPlants] = useState<Plant[]>([]);
+  const [plants, setPlants] = useState<Plant[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Plant | null>(null);
   // Attribution only applies when the NC State reference photo is what's shown.
   const viewingReference = viewing !== null && !viewing.photoUri;
+  const photoSrc = usePhotoUris((plants ?? []).flatMap((plant) => [plant.photoUri, plant.referencePhotoUri]));
 
-  useFocusEffect(
-    useCallback(() => {
-      setPlants(listPlants());
-    }, []),
-  );
+  const load = useCallback(() => {
+    listPlants()
+      .then((result) => {
+        setPlants(result);
+        setLoadError(null);
+      })
+      .catch((error: Error) => setLoadError(error.message));
+  }, []);
+
+  useFocusEffect(load);
 
   return (
     <View style={styles.screen}>
       <Stack.Screen
         options={{
+          headerLeft: () => (
+            <Pressable
+              onPress={() =>
+                confirmAction('Sign out?', 'You can sign back in any time.', 'Sign out', () => {
+                  supabase.auth.signOut();
+                })
+              }
+              hitSlop={12}
+              accessibilityRole="button"
+            >
+              <Text style={styles.headerText}>Sign out</Text>
+            </Pressable>
+          ),
           headerRight: () => (
             <Pressable
               onPress={() => router.push('/about')}
@@ -33,14 +56,18 @@ export default function PlantListScreen() {
           ),
         }}
       />
+      {loadError && <Text style={styles.error}>{loadError}</Text>}
+      {plants === null && !loadError && <ActivityIndicator style={styles.loading} color={colors.accent} />}
       <FlatList
-        data={plants}
-        keyExtractor={(plant) => String(plant.id)}
+        data={plants ?? []}
+        keyExtractor={(plant) => plant.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            No plants yet. Tap “Add plant” to log your first one.
-          </Text>
+          plants === null ? undefined : (
+            <Text style={styles.empty}>
+              No plants yet. Tap “Add plant” to log your first one.
+            </Text>
+          )
         }
         renderItem={({ item }) => (
           // Thumbnail and body are siblings: on web a button nested inside the card's link can't take the tap.
@@ -52,7 +79,7 @@ export default function PlantListScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="View photo"
               >
-                <Image source={{ uri: item.photoUri ?? item.referencePhotoUri! }} style={styles.photo} />
+                <Image source={{ uri: photoSrc(item.photoUri ?? item.referencePhotoUri) ?? undefined }} style={styles.photo} />
               </Pressable>
             ) : (
               <Link href={`/plant/${item.id}`} asChild>
@@ -89,7 +116,7 @@ export default function PlantListScreen() {
           {viewing && (
             <>
               <Image
-                source={{ uri: viewing.photoUri ?? viewing.referencePhotoUri! }}
+                source={{ uri: photoSrc(viewing.photoUri ?? viewing.referencePhotoUri) ?? undefined }}
                 style={styles.viewerPhoto}
                 resizeMode="contain"
               />
@@ -115,8 +142,11 @@ export default function PlantListScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   headerIcon: { color: colors.accent, fontSize: 22, paddingHorizontal: 8 },
+  headerText: { color: colors.accent, fontSize: 15, paddingHorizontal: 8 },
   list: { padding: 16, paddingBottom: 96 },
   empty: { color: colors.muted, marginTop: 48, textAlign: 'center' },
+  error: { color: colors.danger, fontSize: 14, marginHorizontal: 16, marginTop: 12 },
+  loading: { marginTop: 48 },
   card: {
     alignItems: 'stretch',
     backgroundColor: colors.surface,

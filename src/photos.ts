@@ -22,24 +22,6 @@ export function persistPhoto(sourceUri: string): string {
   return destination.uri;
 }
 
-/** Downloads a remote image (e.g. from NC State) so it survives after the presigned URL expires. */
-export async function persistRemotePhoto(url: string): Promise<string> {
-  // expo-file-system has no web implementation, so web keeps the remote URL.
-  if (Platform.OS === 'web') return url;
-
-  const dir = new Directory(Paths.document, PHOTO_DIR);
-  if (!dir.exists) dir.create({ intermediates: true });
-
-  const destination = new File(dir, `${Date.now()}.jpg`);
-  const output = await File.downloadFileAsync(url, destination);
-  return output.uri;
-}
-
-export function deletePhoto(uri: string): void {
-  const file = new File(uri);
-  if (file.exists) file.delete();
-}
-
 /** Lets the user take or choose a photo and stores it; returns null if they cancel or deny access. */
 export async function pickPhoto(fromCamera: boolean): Promise<string | null> {
   const permission = fromCamera

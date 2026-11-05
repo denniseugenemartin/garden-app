@@ -12,7 +12,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#C6E2B2",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -32,7 +32,8 @@
           "photosPermission": "Attach existing photos to your plant records.",
           "cameraPermission": "Take photos of the plants in your garden."
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
   }
 }
