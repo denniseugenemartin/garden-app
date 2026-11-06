@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Journal from '../../src/Journal';
+import IdentifyPlant from '../../src/IdentifyPlant';
 import LocationField from '../../src/LocationField';
 import SpeciesSearch from '../../src/SpeciesSearch';
 import ToolboxSections from '../../src/ToolboxSections';
@@ -383,6 +384,22 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
             onChange={(v) => set('cultivar', v)}
             placeholder="Nikko Blue"
           />
+          {toolboxQuery.trim().length > 0 && (
+            <View style={styles.row}>
+              <Pressable
+                style={styles.secondary}
+                onPress={openToolbox}
+                disabled={openingToolbox}
+                accessibilityLabel="Open in NC State Plant Toolbox"
+              >
+                {openingToolbox ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : (
+                  <Text style={styles.secondaryText}>Open in NC State Toolbox ↗</Text>
+                )}
+              </Pressable>
+            </View>
+          )}
           {/* Wishlist plants aren't planted yet; their stored values are kept for when they move to the garden. */}
           {!draft.wishlist && (
             <>
@@ -426,6 +443,17 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
               <Pressable onPress={() => setPhoto(null)} hitSlop={8} accessibilityRole="button">
                 <Text style={styles.removePhoto}>Remove photo</Text>
               </Pressable>
+              <IdentifyPlant
+                photoUri={photoSrc(draft.photoUri)!}
+                onSelect={(match) =>
+                  setDraft((current) => ({
+                    ...current,
+                    commonName: match.commonNames[0] ?? match.scientificName,
+                    scientificName: match.scientificName,
+                    toolboxSlug: match.toolboxSlug,
+                  }))
+                }
+              />
             </>
           )}
           <View style={styles.row}>
