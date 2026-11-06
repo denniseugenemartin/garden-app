@@ -1,6 +1,7 @@
 import { Link, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { demoSeeded } from './demo';
 import { Plant, listPlants } from './garden';
 import { usePhotoUris } from './photoStorage';
@@ -9,6 +10,7 @@ import { colors } from './theme';
 /** The garden (wishlist = false) or the wishlist, with an add button and a photo viewer. */
 export default function PlantList({ wishlist }: { wishlist: boolean }) {
   const router = useRouter();
+  const { bottom } = useSafeAreaInsets();
   const [plants, setPlants] = useState<Plant[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Plant | null>(null);
@@ -33,7 +35,7 @@ export default function PlantList({ wishlist }: { wishlist: boolean }) {
       <FlatList
         data={plants ?? []}
         keyExtractor={(plant) => plant.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: 96 + bottom }]}
         ListEmptyComponent={
           plants === null ? undefined : (
             <Text style={styles.empty}>
@@ -78,7 +80,7 @@ export default function PlantList({ wishlist }: { wishlist: boolean }) {
         )}
       />
       <Pressable
-        style={styles.fab}
+        style={[styles.fab, { bottom: 28 + bottom }]}
         onPress={() => router.push(wishlist ? '/plant/new?wishlist=1' : '/plant/new')}
       >
         <Text style={styles.fabText}>{wishlist ? 'Add to wishlist' : 'Add plant'}</Text>
@@ -118,7 +120,7 @@ export default function PlantList({ wishlist }: { wishlist: boolean }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { padding: 16, paddingBottom: 96 },
+  list: { padding: 16 },
   empty: { color: colors.muted, marginTop: 48, textAlign: 'center' },
   error: { color: colors.danger, fontSize: 14, marginHorizontal: 16, marginTop: 12 },
   loading: { marginTop: 48 },
@@ -140,7 +142,6 @@ const styles = StyleSheet.create({
   fab: {
     backgroundColor: colors.accent,
     borderRadius: 28,
-    bottom: 28,
     paddingHorizontal: 24,
     paddingVertical: 16,
     position: 'absolute',

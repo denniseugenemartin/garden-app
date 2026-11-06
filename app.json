@@ -11,6 +11,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.dennismartin.garden",
       "adaptiveIcon": {
         "backgroundColor": "#C6E2B2",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { KeyboardAvoidingView } from 'react-native';
 import HomeButton from '../src/HomeButton';
 import { supabase } from '../src/supabase';
 import { colors } from '../src/theme';
@@ -18,8 +19,9 @@ export default function RootLayout() {
 
   if (session === undefined) return null;
 
+  // Android apps are edge-to-edge, so the window no longer shrinks for the keyboard on its own.
   return (
-    <>
+    <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -40,6 +42,6 @@ export default function RootLayout() {
         </Stack.Protected>
         <Stack.Screen name="about" options={{ title: 'About' }} />
       </Stack>
-    </>
+    </KeyboardAvoidingView>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { confirmAction } from './confirm';
 import { JournalEntry, deleteJournalEntry, insertJournalEntry, listJournalEntries } from './garden';
 import { pickPhoto } from './photos';
@@ -20,6 +21,7 @@ function formatDate(isoDate: string): string {
 }
 
 export default function Journal({ plantId }: { plantId: string }) {
+  const { bottom } = useSafeAreaInsets();
   const [entries, setEntries] = useState<JournalEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -74,7 +76,7 @@ export default function Journal({ plantId }: { plantId: string }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 48 + bottom }]} keyboardShouldPersistTaps="handled">
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
@@ -132,7 +134,7 @@ export default function Journal({ plantId }: { plantId: string }) {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: 12, padding: 16, paddingBottom: 48 },
+  content: { gap: 12, padding: 16 },
   composer: { gap: 12 },
   input: {
     backgroundColor: colors.surface,

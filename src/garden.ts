@@ -180,6 +180,30 @@ export async function listPlants(wishlist: boolean): Promise<Plant[]> {
   });
 }
 
+/** Distinct places the garden's plants are planted, most-used first. */
+export async function listLocations(): Promise<string[]> {
+  const rows = check(
+    await supabase
+      .from('plants')
+      .select('location')
+      .eq('garden_id', await getGardenId())
+      .eq('wishlist', false)
+      .not('location', 'is', null),
+  ) as { location: string }[];
+  const byKey = new Map<string, { name: string; count: number }>();
+  for (const { location } of rows) {
+    const trimmed = location.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    const entry = byKey.get(key) ?? { name: trimmed, count: 0 };
+    entry.count++;
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    .map((entry) => entry.name);
+}
+
 export async function getPlant(id: string): Promise<Plant | null> {
   const row = check(await supabase.from('plants').select(PLANT_COLUMNS).eq('id', id).maybeSingle());
   return row ? toPlant(row as PlantRow) : null;

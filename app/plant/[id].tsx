@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, usePreventRemove, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,7 +12,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Journal from '../../src/Journal';
+import LocationField from '../../src/LocationField';
 import SpeciesSearch from '../../src/SpeciesSearch';
 import ToolboxSections from '../../src/ToolboxSections';
 import NcStatePhotoPicker from '../../src/NcStatePhotoPicker';
@@ -111,6 +113,8 @@ export default function PlantScreen() {
 function PlantForm({ plantId, initial }: { plantId: string | null; initial: Loaded }) {
   const router = useRouter();
   const isNew = plantId === null;
+  const { bottom } = useSafeAreaInsets();
+  const contentStyle = [styles.content, { paddingBottom: 48 + bottom }];
 
   const [draft, setDraft] = useState<PlantDraft>(initial.draft);
   // The shared NC State data the toolbox fields came from; saving stores only changes to it.
@@ -134,6 +138,21 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
   const [journalPhotos, setJournalPhotos] = useState<string[]>([]);
   const photoSrc = usePhotoUris([draft.photoUri, ...journalPhotos]);
   const previewUri = photoSrc(draft.photoUri);
+  const [toolboxEdited, setToolboxEdited] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  // NC State info loads into the draft on its own, so only hand edits to it count as changes.
+  const hasChanges =
+    !leaving &&
+    (toolboxEdited ||
+      JSON.stringify({ ...draft, toolboxDescription: null, toolboxSections: null }) !==
+        JSON.stringify({ ...initial.draft, toolboxDescription: null, toolboxSections: null }));
+
+  const allowLeave = usePreventRemove(hasChanges, ({ repeat }) =>
+    confirmAction('Discard changes?', 'You have unsaved changes. Leave without saving?', 'Discard', () => {
+      setLeaving(true);
+      repeat();
+    }),
+  );
 
   useEffect(() => {
     getProfile()
@@ -240,6 +259,8 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
 
   // A directly opened/refreshed web page has no history to go back to.
   function close() {
+    setLeaving(true);
+    allowLeave();
     if (router.canGoBack()) router.back();
     else router.replace('/');
   }
@@ -335,7 +356,7 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
       {tab === 'Journal' && plantId !== null && !draft.wishlist && <Journal plantId={plantId} />}
 
       {tab === 'Plant' && (
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled">
           <Text style={styles.label}>Look up a species</Text>
           <SpeciesSearch
             onSelect={(plant) =>
@@ -365,12 +386,8 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
           {/* Wishlist plants aren't planted yet; their stored values are kept for when they move to the garden. */}
           {!draft.wishlist && (
             <>
-              <Field
-                label="Where it's planted"
-                value={draft.location ?? ''}
-                onChange={(v) => set('location', v)}
-                placeholder="Back bed, east fence…"
-              />
+              <Text style={styles.label}>Where it&apos;s planted</Text>
+              <LocationField value={draft.location ?? ''} onChange={(v) => set('location', v)} />
               <Field
                 label="Planted / acquired"
                 value={draft.acquiredOn ?? ''}
@@ -475,7 +492,7 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
       )}
 
       {tab === 'Info' && (
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled">
           {!draft.scientificName ? (
             <Text style={styles.empty}>
               Look up a species on the Plant tab to load its NC State Plant Toolbox info.
@@ -486,12 +503,14 @@ function PlantForm({ plantId, initial }: { plantId: string | null; initial: Load
                 description={draft.toolboxDescription}
                 sections={draft.toolboxSections}
                 hardinessZone={hardinessZone}
-                onDescriptionChange={(toolboxDescription) =>
-                  setDraft((current) => ({ ...current, toolboxDescription }))
-                }
-                onSectionsChange={(toolboxSections) =>
-                  setDraft((current) => ({ ...current, toolboxSections }))
-                }
+                onDescriptionChange={(toolboxDescription) => {
+                  setToolboxEdited(true);
+                  setDraft((current) => ({ ...current, toolboxDescription }));
+                }}
+                onSectionsChange={(toolboxSections) => {
+                  setToolboxEdited(true);
+                  setDraft((current) => ({ ...current, toolboxSections }));
+                }}
               />
               <View style={[styles.row, styles.toolboxActions]}>
                 <Pressable
@@ -598,7 +617,7 @@ function Field({ label, value, onChange, placeholder, multiline }: FieldProps) {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: 4, padding: 16, paddingBottom: 48 },
+  content: { gap: 4, padding: 16 },
   label: { color: colors.muted, fontSize: 13, marginBottom: 6, marginTop: 16 },
   input: {
     backgroundColor: colors.surface,
